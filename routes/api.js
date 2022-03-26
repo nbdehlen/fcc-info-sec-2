@@ -1,14 +1,14 @@
 "use strict"
 const { Router } = require("express")
-const Thread = require("../db/schema/Thread")
+const Thread = require("../db/schema/thread")
 const router = Router()
 
 const createThread = async (req, res) => {
   try {
     const thread = await Thread.create({
       board: req.params.board,
-      text: req.body?.text,
-      delete_password: req.body?.delete_password,
+      text: req.body.text,
+      delete_password: req.body.delete_password,
     })
 
     return res.status(201).json(thread)
@@ -80,12 +80,15 @@ router.get("/api/threads/:board", getThreadsOverview)
 const reportThread = async (req, res) => {
   const thread_id = req.body.thread_id
   try {
-    await Thread.findOneAndUpdate(
+    const thread = await Thread.findOneAndUpdate(
       { _id: thread_id },
       { reported: true },
       { new: true }
     )
-    return res.status(200).send()
+
+    if (thread.reported) {
+      return res.status(200).send("reported")
+    }
   } catch (e) {
     console.warn(e)
   }
@@ -109,7 +112,23 @@ const getThread = async (req, res) => {
       "replies",
     ]).lean()
 
-    return res.status(200).json(thread)
+    //TODO: Don't be lazy, write the query ;-)
+    const len = thread.replies.length
+    let replies = thread.replies
+
+    if (len > 3) {
+      replies.splice(0, len - 3)
+    }
+
+    replies = replies.map(reply => {
+      delete reply.delete_password
+      delete reply.reported
+      return reply
+    })
+
+    const sanitizedThread = { ...thread, replies }
+
+    return res.status(200).json(sanitizedThread)
   } else {
     return res.send("thread_id doesn't exist")
   }
@@ -149,7 +168,10 @@ const deleteReply = async (req, res) => {
       reply => reply._id.toString() === reply_id
     )
 
-    if (replyExists?.[0]?.delete_password === delete_password) {
+    if (
+      replyExists.length > 0 &&
+      replyExists[0].delete_password === delete_password
+    ) {
       const replies = thread.replies.map(reply => ({
         ...reply,
         text: reply._id.toString() === reply_id ? "[deleted]" : reply.text,
@@ -161,9 +183,8 @@ const deleteReply = async (req, res) => {
       )
       return res.send("success")
     }
-    return res.send("incorrect password")
   }
-  return res.send("thread_id or delete_password missing")
+  return res.send("incorrect password")
 }
 router.delete("/api/replies/:board", deleteReply)
 
@@ -188,7 +209,7 @@ const reportReply = async (req, res) => {
       { $set: { replies } },
       { new: true }
     )
-    return res.json(updatedThread)
+    return res.send("reported")
   }
   return res.send("reply_id doesn't exist")
 }

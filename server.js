@@ -16,7 +16,7 @@ app.use(helmet({ crossOriginEmbedderPolicy: true }))
 app.use(helmet.dnsPrefetchControl())
 app.use(
   helmet({
-    referrerPolicy: { policy: "no-referrer" },
+    referrerPolicy: { policy: "origin" },
   })
 )
 

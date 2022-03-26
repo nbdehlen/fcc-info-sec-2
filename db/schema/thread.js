@@ -1,5 +1,5 @@
 const { default: mongoose } = require("mongoose")
-const Reply = require("./Reply")
+const Reply = require("./reply")
 
 // TODO: Save array of reply ids instead
 const thread = new mongoose.Schema({
