@@ -167,7 +167,6 @@ const deleteReply = async (req, res) => {
     const replyExists = thread.replies.filter(
       reply => reply._id.toString() === reply_id
     )
-
     if (
       replyExists.length > 0 &&
       replyExists[0].delete_password === delete_password
@@ -197,7 +196,8 @@ router.delete("/api/replies/:board", deleteReply)
  */
 const reportReply = async (req, res) => {
   const { thread_id, reply_id } = req.body
-  const thread = await Thread.findOne({ _id: thread_id }).lean().exec()
+  const thread = await Thread.findOne({ _id: thread_id }).lean()
+
   const replies = thread.replies.map(reply => ({
     ...reply,
     reported: reply._id.toString() === reply_id,
@@ -209,8 +209,10 @@ const reportReply = async (req, res) => {
       { $set: { replies } },
       { new: true }
     )
+
     return res.send("reported")
   }
+
   return res.send("reply_id doesn't exist")
 }
 

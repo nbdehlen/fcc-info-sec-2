@@ -163,7 +163,7 @@ suite("Functional Tests", function () {
       .post(threadUrl + board)
       .send({ text: "yalla", delete_password: "password" })
 
-    await chai
+    const createReply = await chai
       .request(server)
       .post(repliesUrl + board)
       .send({
@@ -184,7 +184,8 @@ suite("Functional Tests", function () {
         thread_id: newThread.body._id,
         reply_id: replies.body.replies[replies.body.replies.length - 1]._id,
         delete_password:
-          replies.body.replies[replies.body.replies.length - 1].delete_password,
+          createReply.body.replies[createReply.body.replies.length - 1]
+            .delete_password,
       })
 
     assert.equal(deleteReply.text, "success")
@@ -213,6 +214,6 @@ suite("Functional Tests", function () {
         thread_id: newThread.body._id,
         reply_id: reply.body.replies[0]._id,
       })
-    assert.isTrue(reported.body.replies[0].reported)
+    assert.equal(reported.text, "reported")
   })
 })
