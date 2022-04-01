@@ -1,7 +1,6 @@
 const { default: mongoose } = require("mongoose")
 const Reply = require("./reply")
 
-// TODO: Save array of reply ids instead
 const thread = new mongoose.Schema({
   board: { type: String, required: true },
   text: { type: String, required: true },

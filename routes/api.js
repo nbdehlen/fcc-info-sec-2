@@ -4,30 +4,52 @@ const Thread = require("../db/schema/thread")
 const router = Router()
 
 const createThread = async (req, res) => {
+  const board = req.body.board || req.params.board
+  const { text, delete_password } = req.body
   try {
-    const thread = await Thread.create({
-      board: req.params.board,
-      text: req.body.text,
-      delete_password: req.body.delete_password,
-    })
+    if (board && text && text.length > 0 && delete_password) {
+      const thread = await Thread.create({
+        board: req.params.board,
+        text: req.body.text,
+        delete_password: req.body.delete_password,
+        created_on: new Date(),
+        bumped_on: new Date(),
+        reported: false,
+        replies: [],
+      })
 
-    return res.status(201).json(thread)
-  } catch (e) {}
+      if (thread) {
+        return res.redirect(`/b/${board}/${thread._id.toString()}`)
+      }
+    }
+  } catch (e) {
+    console.warn(e)
+  }
+  return res.send("thread_id doesn't exist")
 }
 
 router.post("/api/threads/:board", createThread)
 
 const deleteThread = async (req, res) => {
+  const { board } = req.params
   const { thread_id, delete_password } = req.body
 
-  if (thread_id && delete_password) {
-    const threadExists = await Thread.findOne({ _id: thread_id })
-
-    if (threadExists.delete_password === delete_password) {
+  if (
+    typeof board === "string" &&
+    board.length > 0 &&
+    thread_id &&
+    delete_password
+  ) {
+    const thread = await Thread.findOneAndDelete({
+      _id: thread_id,
+      board,
+      delete_password,
+    })
+    if (thread) {
       return res.send("success")
     }
-    return res.send("incorrect password")
   }
+  return res.send("incorrect password")
 }
 router.delete("/api/threads/:board", deleteThread)
 
@@ -78,20 +100,27 @@ const getThreadsOverview = async (req, res) => {
 router.get("/api/threads/:board", getThreadsOverview)
 
 const reportThread = async (req, res) => {
-  const thread_id = req.body.thread_id
+  const { board } = req.params
+  const thread_id = req.body.report_id || req.body.thread_id
+
   try {
     const thread = await Thread.findOneAndUpdate(
-      { _id: thread_id },
-      { reported: true },
+      {
+        _id: thread_id,
+        board,
+        // reported: false
+      },
+      { $set: { reported: true } },
       { new: true }
     )
 
-    if (thread.reported) {
+    if (thread) {
       return res.status(200).send("reported")
     }
   } catch (e) {
     console.warn(e)
   }
+  return res.status(503).send("something went wrong")
 }
 router.put("/api/threads/:board", reportThread)
 
@@ -100,10 +129,9 @@ router.put("/api/threads/:board", reportThread)
  * entire thread with all it's replies.
  * reported and delete_password will not be sent
  */
-const getThread = async (req, res) => {
-  const { thread_id } = req.query
-  if (thread_id) {
-    const thread = await Thread.findOne({ _id: thread_id }, [
+const _getThread = async (threadId, board) => {
+  if (threadId) {
+    const thread = await Thread.findOne({ _id: threadId, board }, [
       "_id",
       "board",
       "text",
@@ -113,25 +141,31 @@ const getThread = async (req, res) => {
     ]).lean()
 
     //TODO: Don't be lazy, write the query ;-)
-    const len = thread.replies.length
-    let replies = thread.replies
+    if (thread) {
+      const len = thread.replies.length
+      let replies = thread.replies
 
-    if (len > 3) {
-      replies.splice(0, len - 3)
+      replies = replies.map(reply => {
+        delete reply.delete_password
+        delete reply.reported
+        return reply
+      })
+
+      const sanitizedThread = { ...thread, replies }
+      return sanitizedThread
     }
-
-    replies = replies.map(reply => {
-      delete reply.delete_password
-      delete reply.reported
-      return reply
-    })
-
-    const sanitizedThread = { ...thread, replies }
-
-    return res.status(200).json(sanitizedThread)
-  } else {
-    return res.send("thread_id doesn't exist")
   }
+  return {}
+}
+
+const getThread = async (req, res) => {
+  const { board } = req.params
+  const { thread_id } = req.query
+  const result = await _getThread(thread_id, board)
+  if (result) {
+    return res.json(result)
+  }
+  return res.send("thread_id doesn't exist")
 }
 router.get("/api/replies/:board", getThread)
 
@@ -143,15 +177,28 @@ const createReply = async (req, res) => {
       bumped_on: new Date(),
       $push: {
         replies: {
-          text,
-          delete_password,
-          thread_id,
+          $each: [
+            {
+              text,
+              delete_password,
+              thread_id,
+              created_on: new Date(),
+            },
+          ],
+          $sort: { created_on: -1 },
         },
       },
     },
     { new: true }
   )
-  return res.status(201).json(thread)
+
+  if (thread) {
+    return res.redirect(
+      `/b/${thread.board}/${thread._id}?reply_id=${thread.replies[0]._id}`
+    )
+  }
+
+  return res.send("you goofed it")
 }
 router.post("/api/replies/:board", createReply)
 
@@ -160,31 +207,34 @@ router.post("/api/replies/:board", createReply)
  * on success: text of the reply will be changed to [deleted]
  */
 const deleteReply = async (req, res) => {
+  const { board } = req.params
   const { thread_id, reply_id, delete_password } = req.body
-  if (thread_id && delete_password) {
-    // TODO: Don't be lazy, write the query ;-)
-    const thread = await Thread.findOne({ _id: thread_id }).lean()
-    const replyExists = thread.replies.filter(
-      reply => reply._id.toString() === reply_id
+
+  if (thread_id && delete_password && reply_id) {
+    const thread = await Thread.findOneAndUpdate(
+      {
+        _id: thread_id,
+        board,
+        replies: {
+          $elemMatch: {
+            _id: reply_id,
+            delete_password,
+            text: { $ne: "[deleted]" },
+          },
+        },
+      },
+      {
+        $set: { "replies.$.text": "[deleted]" },
+      }
     )
-    if (
-      replyExists.length > 0 &&
-      replyExists[0].delete_password === delete_password
-    ) {
-      const replies = thread.replies.map(reply => ({
-        ...reply,
-        text: reply._id.toString() === reply_id ? "[deleted]" : reply.text,
-      }))
-      await Thread.findOneAndUpdate(
-        { _id: thread_id },
-        { replies },
-        { new: true }
-      )
-      return res.send("success")
+    if (thread) {
+      return res.status(200).send("success")
     }
   }
+
   return res.send("incorrect password")
 }
+
 router.delete("/api/replies/:board", deleteReply)
 
 /**
@@ -195,21 +245,26 @@ router.delete("/api/replies/:board", deleteReply)
  * onSuccess: the reported value of the reply_id will be changed to true
  */
 const reportReply = async (req, res) => {
+  const { board } = req.params
   const { thread_id, reply_id } = req.body
-  const thread = await Thread.findOne({ _id: thread_id }).lean()
 
-  const replies = thread.replies.map(reply => ({
-    ...reply,
-    reported: reply._id.toString() === reply_id,
-  }))
+  const thread = await Thread.findOneAndUpdate(
+    {
+      _id: thread_id,
+      board,
+      replies: {
+        $elemMatch: {
+          _id: reply_id,
+          reported: false,
+        },
+      },
+    },
+    {
+      $set: { "replies.$.reported": true },
+    }
+  ).lean()
 
-  if (replies.length > 0) {
-    const updatedThread = await Thread.findOneAndUpdate(
-      { _id: thread_id },
-      { $set: { replies } },
-      { new: true }
-    )
-
+  if (thread) {
     return res.send("reported")
   }
 
